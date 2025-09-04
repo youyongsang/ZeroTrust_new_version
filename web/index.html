@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ko">
+
+<head>
+  <meta charset="utf-8" />
+  <title>auth-min — 로그인/로그아웃 데모</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="./css/styles.css" />
+</head>
+
+<body>
+  <main class="container">
+    <h1>auth-min</h1>
+    <p class="hint">
+      ※ 개발 팁: <code>web</code> 폴더에서 <code>python -m http.server 5500</code> 로 띄우고,<br />
+      API 서버는 <code>http://localhost:8000</code> 에서 CORS(allow_credentials) 허용해 주세요.
+    </p>
+
+    <section class="card" id="statusCard">
+      <h2>세션 상태</h2>
+      <div id="meBox" class="mono">확인 중...</div>
+      <div class="row gap">
+        <button id="btnRefresh" class="btn">상태 새로고침</button>
+        <button id="btnLogout" class="btn btn-outline">로그아웃</button>
+      </div>
+      <div id="outMsg" class="mono small"></div>
+    </section>
+
+    <section class="card">
+      <h2>로그인</h2>
+      <label for="email">이메일</label>
+      <input id="email" type="email" placeholder="you@example.com" required />
+
+      <label for="password">비밀번호</label>
+      <input id="password" type="password" placeholder="••••••••••" required />
+
+      <button id="btnLogin" class="btn btn-primary">로그인</button>
+      <div id="loginMsg" class="mono small"></div>
+    </section>
+
+    <section class="card">
+      <h2>회원가입</h2>
+      <label for="regEmail">이메일</label>
+      <input id="regEmail" type="email" placeholder="you@example.com" required />
+      <label for="regPass">비밀번호 (최소 10자)</label>
+      <input id="regPass" type="password" placeholder="••••••••••" required />
+      <button id="btnRegister" class="btn">회원가입</button>
+      <div id="regMsg" class="mono small"></div>
+    </section>
+  </main>
+
+  <script src="./js/app.js"></script>
+</body>
+
+</html>
