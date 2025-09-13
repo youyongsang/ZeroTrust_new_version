@@ -48,4 +48,9 @@ class Settings:
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret")
     EMAIL_TOKEN_EXPIRE_HOURS = int(os.getenv("EMAIL_TOKEN_EXPIRE_HOURS", "24"))
 
+    # TOTP/MFA
+    ISSUER_NAME = os.getenv("ISSUER_NAME", "ZeroTrust")
+    BACKUP_CODE_COUNT = int(os.getenv("BACKUP_CODE_COUNT", "8"))
+    BACKUP_CODE_PEPPER = os.getenv("BACKUP_CODE_PEPPER", "dev-pepper")
+
 settings = Settings()
