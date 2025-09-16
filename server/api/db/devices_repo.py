@@ -2,7 +2,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 from bson import ObjectId
-from ..db.mongo import users_col, _db
+from .mongo import users_col, _db
 
 # 별도 컬렉션 생성
 _devices = _db["devices"]
