@@ -48,4 +48,11 @@ class Settings:
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret")
     EMAIL_TOKEN_EXPIRE_HOURS = int(os.getenv("EMAIL_TOKEN_EXPIRE_HOURS", "24"))
 
+        # 추가: 디바이스 토큰 쿠키/만료
+    DEVICE_COOKIE_NAME = "devtk"
+    DEVICE_COOKIE_SECURE = COOKIE_SECURE            # 배포시 True 권장
+    DEVICE_COOKIE_SAMESITE = COOKIE_SAMESITE        # "lax" 권장
+    DEVICE_TOKEN_SECRET = SECRET_KEY + "_device"
+    DEVICE_TOKEN_EXPIRE_DAYS = 180                  # 6개월 정도
+
 settings = Settings()
