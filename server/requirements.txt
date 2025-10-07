@@ -6,3 +6,4 @@ python-dotenv>=1.0
 argon2-cffi>=23.1.0
 itsdangerous>=2.1.2
 email-validator>=2.2
+pyotp==2.9.0
