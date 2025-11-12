@@ -11,7 +11,7 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 import secrets
 
 from ..db import users_repo
-from ..db.devices_repo import upsert_device, is_revoked, mark_seen
+from ..db import devices_repo
 from ..services.password import verify_password, hash_password
 from ..services.email_service import send_email
 from ..services.device_token import make_device_token, verify_device_token
@@ -106,10 +106,12 @@ def _finalize_login(response: Response, request: Request, u: dict, did: Optional
     request.session.clear()
     request.session["uid"] = uid
     request.session["email"] = u.get("email") or u.get("email_norm")
+    print("Session set:", request.session.get("uid"), request.session.get("email"))
 
     # devtk 쿠키가 없고 did가 있으면(이 브라우저를 신뢰) 새로 발급
     dev_cookie = request.cookies.get(DEVICE_COOKIE_NAME)
     if not dev_cookie and did:
+        print("Setting device cookie")
         token_val = make_device_token(uid, did)
         response.set_cookie(
             key=DEVICE_COOKIE_NAME,
@@ -123,7 +125,8 @@ def _finalize_login(response: Response, request: Request, u: dict, did: Optional
         )
 
     if did:
-        mark_seen(uid, did)
+        print("Mark device seen:", did)
+        devices_repo.mark_seen(uid, did)
 
 
 def _gen_email_code() -> str:
@@ -205,7 +208,7 @@ def send_email_code(body: EmailCodeSend):
 
 
 @router.post("/auth/verify-email-code")
-def verify_email_code(body: EmailCodeVerify):
+def verify_email_code(body: EmailCodeVerify, request: Request):
     """
     이메일 6자리 코드 검증:
       - 코드/만료/시도횟수 확인
@@ -246,6 +249,8 @@ def verify_email_code(body: EmailCodeVerify):
             "$unset": {"email_code": ""},
         },
     )
+
+    request.session["uid"] = str(u["_id"])
 
     # TOTP 임시 secret 발급 -> QR 정보 반환
     temp_secret = TOTP.gen_base32_secret()
@@ -290,7 +295,9 @@ def login(body: LoginReq, request: Request, response: Response):
     tok = verify_device_token(dev_cookie) if dev_cookie else None
     if tok:
         tok_uid, tok_did = tok
-        if tok_uid == uid and not is_revoked(uid, tok_did):
+        print("tok_uid:", tok_uid, "->", devices_repo.is_approved(uid, tok_did), devices_repo.is_revoked(uid, tok_did), uid == tok_uid)
+        print("tok_uid:", tok_uid, "uid:", uid)
+        if tok_uid == uid and devices_repo.is_approved(uid, tok_did) and not devices_repo.is_revoked(uid, tok_did):
             # → 신뢰된 기기. OTP 단계로 이동.
             request.session[S_PRE_UID] = uid
             request.session[S_PRE_EMAIL] = u.get("email") or email_norm
@@ -309,12 +316,33 @@ def login(body: LoginReq, request: Request, response: Response):
                     "next": "activate_totp",
                     "totp": {"secret": temp, "otpauth_url": TOTP.build_otpauth_url(temp, u.get("email") or email_norm)}
                 }
+        # else에서는 return하지 않고 아래로 진행
 
-    # 2) devtk 없음/무효 → dev_id 필요 & 이메일 승인 진행
+    # devtk 없음/무효 또는 승인되지 않은 기기 → dev_id 필요 & 이메일 승인 진행
     dev_id = (body.dev_id or "").strip()
     if not dev_id:
         return {"ok": True, "device_required": True, "reason": "need_dev_id"}
 
+    # dev_id가 approved 상태면 바로 OTP 단계로 진입
+    if devices_repo.is_approved(uid, dev_id) and not devices_repo.is_revoked(uid, dev_id):
+        request.session[S_PRE_UID] = uid
+        request.session[S_PRE_EMAIL] = u.get("email") or email_norm
+        request.session[S_PRE_DID] = dev_id
+
+        mfa = (u.get("mfa") or {})
+        if mfa.get("totp_enabled"):
+            return {"ok": True, "next": "otp"}
+        else:
+            temp = mfa.get("totp_temp_secret") or TOTP.gen_base32_secret()
+            if not mfa.get("totp_temp_secret"):
+                users_repo.set_totp_temp_secret(uid, temp)
+            return {
+                "ok": True,
+                "next": "activate_totp",
+                "totp": {"secret": temp, "otpauth_url": TOTP.build_otpauth_url(temp, u.get("email") or email_norm)}
+            }
+
+    # 승인되지 않은 기기면 이메일 승인 진행
     link = build_device_approve_link(request, uid, u.get("email") or email_norm, dev_id)
     html = f"""
       <h3>Approve new device</h3>
@@ -328,18 +356,15 @@ def login(body: LoginReq, request: Request, response: Response):
 
 
 @router.post("/auth/mfa/totp/activate")
-def activate_totp_login(body: TotpCode, request: Request, response: Response):
+def activate_totp_register(body: TotpCode, request: Request):
     """
-    로그인 진행 중(비번 + 신뢰 기기 통과 후) 최초 TOTP 활성화 & 로그인 완료
-    - 세션에 S_PRE_UID 가 있어야 함
+    회원가입 직후 TOTP 활성화 (세션에 uid가 있어야 함)
     """
-    pre_uid = request.session.get(S_PRE_UID)
-    pre_email = request.session.get(S_PRE_EMAIL)
-    pre_did = request.session.get(S_PRE_DID)
-    if not pre_uid:
-        raise HTTPException(status_code=400, detail="No pending login")
+    uid = request.session.get("uid")
+    if not uid:
+        raise HTTPException(status_code=400, detail="No pending registration")
 
-    u = users_repo.get_by_id(pre_uid)
+    u = users_repo.get_by_id(uid)
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -352,16 +377,11 @@ def activate_totp_login(body: TotpCode, request: Request, response: Response):
     if not ok:
         raise HTTPException(status_code=400, detail="Invalid TOTP code")
 
-    # 백업코드 생성 & 저장
     backups = TOTP.gen_backup_codes()
     backup_hashes = [TOTP.hash_backup_code(c) for c in backups]
-    users_repo.activate_totp(pre_uid, temp_secret, backup_hashes)
-    users_repo.set_last_counter(pre_uid, int(step))
+    users_repo.activate_totp(uid, temp_secret, backup_hashes)
+    users_repo.set_last_counter(uid, int(step))
 
-    # 최종 로그인 확정
-    _finalize_login(response, request, u, pre_did)
-
-    # 프런트에 실제 백업코드(평문) 1회 제공
     return {"ok": True, "backup_codes": backups}
 
 
@@ -418,31 +438,21 @@ def approve_device(token: str, request: Request):
     if not uid or not did:
         return HTMLResponse("<h3>Invalid payload.</h3>", status_code=400)
 
-    # devtk 세팅
-    token_val = make_device_token(uid, did)
-    resp = HTMLResponse("<h3>Device approved ✅<br/>Return to the app and login again.</h3>")
-    resp.set_cookie(
-        key=DEVICE_COOKIE_NAME,
-        value=token_val,
-        httponly=True,
-        secure=DEVICE_COOKIE_SECURE,
-        samesite=DEVICE_COOKIE_SAMESITE,
-        max_age=DEVICE_TOKEN_EXPIRE_DAYS * 24 * 3600,
-        domain=COOKIE_DOMAIN if COOKIE_DOMAIN else None,
-        path="/",
-    )
+    # UA/IP 해시 생성
+    ua = request.headers.get("user-agent", "")
+    ip = request.client.host if request.client else ""
+    ua_hash = hashlib.sha256(ua.encode()).hexdigest()
+    ip_hash = hashlib.sha256(ip.encode()).hexdigest()
 
-    # 디바이스 메타 기록(선택)
-    ua_raw = (request.headers.get("user-agent") or "").encode("utf-8")
-    ip_raw = (request.client.host if request.client else "").encode("utf-8")
-    ua_hash = hashlib.sha256(ua_raw).hexdigest() if ua_raw else None
-    ip_hash = hashlib.sha256(ip_raw).hexdigest() if ip_raw else None
-    upsert_device(uid, did, label=None, ua_hash=ua_hash, ip_hash=ip_hash)
+    # DB에 pending 승인 요청 저장
+    devices_repo.insert_pending_approval(uid, did, ua_hash, ip_hash)
 
-    return resp
+    # 안내 메시지: "관리자 승인 대기 중입니다."
+    return HTMLResponse("<h3>기기 승인 요청이 접수되었습니다.<br/>관리자 승인 후 사용 가능합니다.</h3>")
 
 
 @router.post("/auth/logout")
-def logout(request: Request):
+def logout(request: Request, response: Response):
     request.session.clear()
+    response.delete_cookie(DEVICE_COOKIE_NAME)
     return {"ok": True}

@@ -42,18 +42,26 @@ function setMsg(el, obj) {
 function renderQR(el, otpauth) {
   if (!el) return;
   el.innerHTML = "";
-  if (otpauth && window.QRCode) {
+  // QRCode 라이브러리 체크 및 오류 안내 강화
+  if (otpauth && window.QRCode && typeof window.QRCode.toCanvas === "function") {
     const canvas = document.createElement("canvas");
     el.appendChild(canvas);
     QRCode.toCanvas(canvas, otpauth, { width: 192, margin: 1 }, (err) => {
-      if (err) console.error("QR render error:", err);
+      if (err) {
+        console.error("QR render error:", err);
+        el.innerHTML = "<p class='mono small'>QR 코드 생성 중 오류가 발생했습니다.</p>";
+      }
     });
   } else {
-    console.log(window.QRCode);
-    console.log(otpauth);
     const p = document.createElement("p");
     p.className = "mono small";
-    p.textContent = "(QR 라이브러리가 없거나 URI가 비어 있음)";
+    if (!window.QRCode) {
+      p.textContent = "(QR 라이브러리가 로드되지 않았습니다. 스크립트 경로를 확인하세요)";
+    } else if (!otpauth) {
+      p.textContent = "(QR 코드 URI가 비어 있습니다)";
+    } else {
+      p.textContent = "(QR 코드 생성 함수가 없습니다)";
+    }
     el.appendChild(p);
   }
 }
@@ -65,6 +73,19 @@ async function loadMe() {
   const r = await http("GET", "/me");
   const user = r.ok ? (r.data.user ?? r.data) : null;
   setMsg(out, user);
+
+  // 로그인 상태에 따라 UI 제어
+  if (user && user.email) {
+    // 로그인된 상태: 로그인/회원가입 박스 숨김
+    show("loginBox", false);
+    show("registerBox", false);
+    show("logoutBox", true); // 로그아웃 버튼 등은 보여줌
+  } else {
+    // 로그아웃 상태: 로그인/회원가입 박스 표시
+    show("loginBox", true);
+    show("registerBox", true);
+    show("logoutBox", false);
+  }
 }
 
 // ==== 로그인 ====
@@ -87,44 +108,25 @@ async function onLogin() {
 
   // 새 기기 → 이메일 승인 필요
   if (r.ok && r.data && r.data.device_required) {
+    console.log(r.data.device_required);
     return setMsg(
       msg,
       `새 기기 로그인 승인 메일을 보냈습니다. 메일의 링크를 이 브라우저에서 열고, 다시 로그인하세요. (dev_id: ${devId})`
     );
   }
 
-  // 신뢰 기기 OK → 다음 단계 분기
-  if (r.ok && r.data && r.data.next === "activate_totp") {
-    // 최초 활성화 단계: QR + 첫 코드 입력
-    const totp = r.data.totp || {};
-    $("totpActSecret").textContent = totp.secret || "";
-    const u = $("totpActUrl");
-    if (u) { u.textContent = totp.otpauth_url || ""; u.setAttribute("href", totp.otpauth_url || "#"); }
-    renderQR($("qrBoxAct"), totp.otpauth_url || "");
-    setMsg($("totpActivateInfo"), "인증앱을 등록하고 6자리 코드를 입력하세요.");
-    show("totpActivateBox", true);
-    return;
-  }
-
+  // 최초 활성화 단계: 첫 코드 입력 (이제 QR은 안 보여줌)
   if (r.ok && r.data && r.data.next === "otp") {
-    // 일반 OTP 입력 단계
     setMsg($("mfaMsg"), "앱의 6자리 코드를 입력하세요.");
     show("mfaBox", true);
     return;
   }
 
-  // 이미 모든 단계 통과 → 로그인 완결
-  if (r.ok) {
-    $("password").value = "";
-    await loadMe();
-  } else {
-    if (r.status === 401) setMsg(msg, "이메일 또는 비밀번호가 올바르지 않습니다.");
-    if (r.status === 403) setMsg(msg, "이메일 미인증 상태입니다. 받은 편지함을 확인하세요.");
-  }
 }
 
 // ==== OTP 검증(로그인 중) ====
 async function onVerifyOtp() {
+  console.log("onVerifyOtp");
   const code = $("otpCode")?.value.trim();
   const msg = $("mfaMsg");
   if (!code) return setMsg(msg, "OTP 코드를 입력하세요.");
@@ -135,39 +137,11 @@ async function onVerifyOtp() {
     $("otpCode").value = "";
     show("mfaBox", false);
     await loadMe();
+    alert("로그인에 성공했습니다.");
+    location.reload();
   }
 }
 
-// ==== 최초 TOTP 활성화 & 로그인 ====
-async function onActivateTotp() {
-  const code = $("totpActivateCode")?.value.trim();
-  const msg = $("totpActivateMsg");
-  if (!code) return setMsg(msg, "앱의 6자리 코드를 입력하세요.");
-  setMsg(msg, "활성화 중...");
-
-  const r = await http("POST", "/auth/mfa/totp/activate", { code });
-  setMsg(msg, r);
-
-  if (r.ok) {
-    // 백업코드 1회 표시
-    const backup = $("backupList");
-    if (backup) {
-      backup.innerHTML = "";
-      const codes = r.data.backup_codes || [];
-      if (codes.length) {
-        const ul = document.createElement("ul");
-        codes.forEach(c => { const li = document.createElement("li"); li.textContent = c; ul.appendChild(li); });
-        backup.appendChild(ul);
-      } else {
-        backup.textContent = "(백업코드 없음)";
-      }
-    }
-    $("totpActivateCode").value = "";
-    // 로그인 완료
-    show("totpActivateBox", false);
-    await loadMe();
-  }
-}
 
 // ==== 로그아웃 ====
 async function onLogout() {
@@ -193,8 +167,6 @@ async function onRegister() {
     // 이전 QR 표시가 있으면 숨김/초기화
     show("totpRegBox", false);
     $("qrBoxReg").innerHTML = "";
-    $("totpRegSecret").textContent = "";
-    $("totpRegUrl").textContent = "";
     setMsg($("totpRegInfo"), "받은 메일의 6자리 코드를 아래에 입력하고 확인을 누르세요.");
   }
 }
@@ -211,13 +183,29 @@ async function onVerifyEmailCode() {
   setMsg(msg, r);
 
   if (r.ok && r.data && r.data.totp) {
-    const { secret, otpauth_url } = r.data.totp;
-    $("totpRegSecret").textContent = secret || "";
-    const u = $("totpRegUrl");
-    if (u) { u.textContent = otpauth_url || ""; u.setAttribute("href", otpauth_url || "#"); }
+    const { otpauth_url } = r.data.totp;
     renderQR($("qrBoxReg"), otpauth_url || "");
     setMsg($("totpRegInfo"), "인증앱(Google/Microsoft Authenticator 등)으로 QR을 스캔해 등록하세요.");
     show("totpRegBox", true);
+  }
+}
+
+// ==== 최초 TOTP 활성화 & 회원가입 완료 ====
+async function onActivateTotpReg() {
+  const code = $("totpActivateCode")?.value.trim();
+  const msg = $("totpActivateMsg");
+  if (!code) return setMsg(msg, "앱의 6자리 코드를 입력하세요.");
+  setMsg(msg, "활성화 중...");
+
+  // 서버에 OTP 활성화 요청
+  const r = await http("POST", "/auth/mfa/totp/activate", { code });
+  setMsg(msg, r);
+
+  if (r.ok) {
+    $("totpActivateCode").value = "";
+    show("totpRegBox", false);
+    alert("회원가입이 완료되었습니다.");
+    location.reload();
   }
 }
 
@@ -228,8 +216,8 @@ window.addEventListener("DOMContentLoaded", () => {
   $("btnRefresh")?.addEventListener("click", loadMe);
   $("btnRegister")?.addEventListener("click", onRegister);
 
-  $("btnOtp")?.addEventListener("click", onVerifyOtp);
-  $("btnActivateTotp")?.addEventListener("click", onActivateTotp);
+  $("btnOtp")?.addEventListener("click", onVerifyOtp); // 로그인용 OTP
+  $("btnActivateTotp")?.addEventListener("click", onActivateTotpReg); // 회원가입용 OTP
 
   $("btnVerifyEmailCode")?.addEventListener("click", onVerifyEmailCode);
 

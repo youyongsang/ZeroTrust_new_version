@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .core.config import settings
 from .routers import auth as auth_router
+from .routers.admin import router as admin_router
 
 
 def _parse_cors_origins(val: Union[str, List[str], None]) -> List[str]:
@@ -53,6 +54,7 @@ app.add_middleware(
 
 # --- API 라우터 ---
 app.include_router(auth_router.router)
+app.include_router(admin_router)
 
 # --- 정적 프론트 서빙 ---
 # 프로젝트 루트에 있는 web/ 폴더를 루트 경로에 마운트

@@ -42,3 +42,38 @@ def revoke_device(user_id: str, device_id: str) -> bool:
         {"$set": {"revoked": True, "updatedAt": datetime.now(timezone.utc)}}
     )
     return res.modified_count > 0
+
+def insert_pending_approval(user_id: str, device_id: str, ua_hash: str, ip_hash: str):
+    _devices.update_one(
+        {"user_id": user_id, "device_id": device_id},
+        {"$set": {
+            "user_id": user_id,
+            "device_id": device_id,
+            "ua_hash": ua_hash,
+            "ip_hash": ip_hash,
+            "status": "pending",
+            "requestedAt": datetime.now(timezone.utc),
+            "revoked": False,
+        }, "$setOnInsert": {
+            "createdAt": datetime.now(timezone.utc),
+        }},
+        upsert=True
+    )
+
+def get_pending_approvals():
+    return list(_devices.find({"status": "pending"}))
+
+def approve_device(user_id: str, device_id: str):
+    _devices.update_one(
+        {"user_id": user_id, "device_id": device_id, "status": "pending"},
+        {"$set": {
+            "status": "approved",
+            "approvedAt": datetime.now(timezone.utc),
+            "revoked": False,
+            "updatedAt": datetime.now(timezone.utc),
+        }}
+    )
+
+def is_approved(user_id: str, device_id: str) -> bool:
+    doc = _devices.find_one({"user_id": user_id, "device_id": device_id, "status": "approved"})
+    return bool(doc)
