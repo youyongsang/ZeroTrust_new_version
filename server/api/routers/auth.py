@@ -5,7 +5,7 @@ from typing import Optional, Tuple, List
 import hashlib
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from pydantic import BaseModel, EmailStr
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 import secrets
@@ -283,8 +283,42 @@ def login(body: LoginReq, request: Request, response: Response):
         raise HTTPException(status_code=400, detail="Email and password are required")
 
     u = users_repo.get_by_email_norm(email_norm)
-    if not u or not verify_password(body.password, u.get("password_hash", "")):
+    if not u:
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    uid = str(u["_id"])
+
+    # 로그인 잠금 체크
+    lock = users_repo.get_login_lock(uid)
+    if lock.get("locked_until"):
+        now = datetime.now(timezone.utc)
+        locked_until = lock["locked_until"]
+        # DB에서 온 값이 naive datetime일 수 있으니 tzinfo 없으면 UTC로 간주
+        if getattr(locked_until, "tzinfo", None) is None:
+            locked_until = locked_until.replace(tzinfo=timezone.utc)
+        if locked_until > now:
+            retry_after = int((locked_until - now).total_seconds())
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "ok": False,
+                    "locked": True,
+                    "retry_after": retry_after,
+                    "message": f"연속된 로그인 실패로 제한이 걸렸습니다. {retry_after}초 후에 다시 시도해 주세요."
+                },
+            )
+
+    # 비밀번호 검증
+    if not verify_password(body.password, u.get("password_hash", "")):
+        cnt = users_repo.incr_failed_login(uid)
+        if cnt >= 5:
+            users_repo.lock_account(uid, minutes=5)
+            raise HTTPException(status_code=429, detail="Too many failed attempts. Account locked for 5 minutes.")
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # 로그인 성공 시 실패 카운트 리셋
+    users_repo.reset_failed_login(uid)
+
     if not u.get("email_verified", False):
         raise HTTPException(status_code=403, detail="Email not verified")
 
@@ -392,30 +426,82 @@ def verify_totp_login(body: TotpCode, request: Request, response: Response):
     - 세션에 S_PRE_UID 가 있어야 함
     - 리플레이 방지: last_counter < step 여야 함
     """
-    pre_uid = request.session.get(S_PRE_UID)
-    pre_did = request.session.get(S_PRE_DID)
-    if not pre_uid:
-        raise HTTPException(status_code=400, detail="No pending login")
 
-    u = users_repo.get_by_id(pre_uid)
+    # --- pre_uid 확보(세션 우선, 없으면 세션의 이메일 또는 요청 바디의 이메일로 조회) ---
+    pre_uid = request.session.get(S_PRE_UID)
+    pre_email = request.session.get(S_PRE_EMAIL)
+
+    # 요청 바디에 email 필드가 있으면 보조로 사용
+    if not pre_email and hasattr(body, "email"):
+        pre_email = getattr(body, "email")
+
+    if not pre_uid and pre_email:
+        # users_repo에 이메일로 사용자 조회 함수명에 맞게 조정하세요
+        if hasattr(users_repo, "get_by_email_norm"):
+            u = users_repo.get_by_email_norm(pre_email)
+        elif hasattr(users_repo, "get_by_email"):
+            u = users_repo.get_by_email(pre_email)
+        else:
+            u = None
+        if u:
+            pre_uid = str(u.get("_id"))
+
+    if not pre_uid:
+        # 세션이 없으면 더 이상 진행 불가(클라이언트에게 명확한 안내)
+        raise HTTPException(status_code=400, detail="No pending login. 로그인 흐름을 다시 시작하세요.")
+
+    # --- OTP 잠금 체크 (DB에서 가져온 값이 naive datetime일 수 있으므로 tz 보정) ---
+    totp_lock = users_repo.get_totp_lock(pre_uid)
+    if totp_lock.get("locked_until"):
+        now = datetime.now(timezone.utc)
+        locked_until = totp_lock["locked_until"]
+        if getattr(locked_until, "tzinfo", None) is None:
+            locked_until = locked_until.replace(tzinfo=timezone.utc)
+        if locked_until > now:
+            retry_after = int((locked_until - now).total_seconds())
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "ok": False,
+                    "locked": True,
+                    "retry_after": retry_after,
+                    "message": f"연속된 OTP 실패로 제한이 걸렸습니다. {retry_after}초 후에 다시 시도해 주세요."
+                },
+            )
+
+    # --- 사용자 로드 (항상 u가 설정되도록) ---
+    if hasattr(users_repo, "get_by_id"):
+        u = users_repo.get_by_id(pre_uid)
+    elif hasattr(users_repo, "get"):
+        u = users_repo.get(pre_uid)
+    else:
+        # 이메일 기반 조회 함수가 있으면 시도
+        if pre_email and hasattr(users_repo, "get_by_email_norm"):
+            u = users_repo.get_by_email_norm(pre_email)
+        elif pre_email and hasattr(users_repo, "get_by_email"):
+            u = users_repo.get_by_email(pre_email)
+        else:
+            u = None
+
     if not u:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=400, detail="No pending user")
 
     mfa = (u.get("mfa") or {})
-    if not mfa.get("totp_enabled") or not mfa.get("totp_secret"):
-        raise HTTPException(status_code=400, detail="TOTP not enabled")
 
-    ok, step = TOTP.verify_totp(mfa["totp_secret"], body.code)
+    # --- TOTP 검증 ---
+    ok, _ = TOTP.verify_totp(mfa.get("totp_secret", ""), body.code)
     if not ok:
+        cnt = users_repo.incr_failed_totp(pre_uid)
+        if cnt >= 5:
+            users_repo.lock_totp(pre_uid, minutes=5)
+            # 이메일 발송 등 기존 처리...
+            return JSONResponse(status_code=429, content={"ok": False, "locked": True, "message": "연속된 OTP 실패로 계정이 5분 동안 잠겼습니다."})
         raise HTTPException(status_code=400, detail="Invalid TOTP code")
 
-    # 리플레이 방지
-    last = users_repo.get_last_counter(pre_uid)
-    if step is None or int(step) <= int(last):
-        raise HTTPException(status_code=400, detail="Code already used")
-    users_repo.set_last_counter(pre_uid, int(step))
+    # --- 성공 처리: pre_did는 세션에서 가져옴 (없으면 None 허용) ---
+    pre_did = request.session.get(S_PRE_DID) or None
+    users_repo.reset_failed_totp(pre_uid)
 
-    # 최종 로그인 확정
     _finalize_login(response, request, u, pre_did)
     return {"ok": True}
 

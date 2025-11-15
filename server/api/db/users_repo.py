@@ -2,7 +2,8 @@
 from __future__ import annotations
 from typing import Optional, List, Dict, Any
 from bson import ObjectId
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from pymongo import ReturnDocument
 from .mongo import users_col
 
 # ===== 기본 조회/삽입 =====
@@ -130,3 +131,63 @@ def set_last_counter(user_id: str, counter: int) -> None:
         {"_id": ObjectId(user_id)},
         {"$set": {"mfa.last_counter": int(counter), "updatedAt": datetime.now(timezone.utc)}},
     )
+
+    # ===== 로그인 실패 관리 ===== 
+
+def incr_failed_login(user_id: str) -> int:
+    now = datetime.now(timezone.utc)
+    res = users_col().find_one_and_update(
+        {"_id": ObjectId(user_id)},
+        {"$inc": {"login_failed_count": 1}, "$set": {"login_last_failed_at": now}},
+        return_document=ReturnDocument.AFTER,
+    )
+    return int(res.get("login_failed_count", 0))
+
+def reset_failed_login(user_id: str) -> None:
+    users_col().update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"login_failed_count": 0, "login_last_failed_at": None, "login_locked_until": None}},
+    )
+
+def lock_account(user_id: str, minutes: int = 5) -> None:
+    locked_until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+    users_col().update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"login_locked_until": locked_until, "login_failed_count": 0, "login_last_failed_at": None}},
+    )
+
+def get_login_lock(user_id: str) -> dict:
+    doc = users_col().find_one({"_id": ObjectId(user_id)}, {"login_failed_count": 1, "login_last_failed_at": 1, "login_locked_until": 1})
+    if not doc:
+        return {"count": 0, "last": None, "locked_until": None}
+    return {"count": int(doc.get("login_failed_count", 0)), "last": doc.get("login_last_failed_at"), "locked_until": doc.get("login_locked_until")}
+
+# ===== otp 로그인 실패 관리 =====
+
+def incr_failed_totp(user_id: str) -> int:
+    now = datetime.now(timezone.utc)
+    res = users_col().find_one_and_update(
+        {"_id": ObjectId(user_id)},
+        {"$inc": {"totp_failed_count": 1}, "$set": {"totp_last_failed_at": now}},
+        return_document=ReturnDocument.AFTER,
+    )
+    return int(res.get("totp_failed_count", 0))
+
+def reset_failed_totp(user_id: str) -> None:
+    users_col().update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"totp_failed_count": 0, "totp_last_failed_at": None, "totp_locked_until": None}},
+    )
+
+def lock_totp(user_id: str, minutes: int = 5) -> None:
+    locked_until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+    users_col().update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"totp_locked_until": locked_until, "totp_failed_count": 0, "totp_last_failed_at": None}},
+    )
+
+def get_totp_lock(user_id: str) -> dict:
+    doc = users_col().find_one({"_id": ObjectId(user_id)}, {"totp_failed_count": 1, "totp_last_failed_at": 1, "totp_locked_until": 1})
+    if not doc:
+        return {"count": 0, "last": None, "locked_until": None}
+    return {"count": int(doc.get("totp_failed_count", 0)), "last": doc.get("totp_last_failed_at"), "locked_until": doc.get("totp_locked_until")}

@@ -106,6 +106,17 @@ async function onLogin() {
   const r = await http("POST", "/auth/login", { email, password, dev_id: devId });
   setMsg(msg, r);
 
+  // locked 처리: 서버가 429과 retry_after를 보낼 때
+  if (r && (r.status === 429 || (r.data && r.data.locked))) {
+    const secs = (r.data && r.data.retry_after) ? r.data.retry_after : null;
+    if (secs !== null) {
+      alert(`연속된 로그인 실패로 제한이 걸렸습니다. ${secs}초 후에 다시 시도해 주세요.`);
+    } else {
+      alert("연속된 로그인 실패로 제한이 걸렸습니다. 잠시 후 다시 시도해 주세요.");
+    }
+    return;
+  }
+
   // 새 기기 → 이메일 승인 필요
   if (r.ok && r.data && r.data.device_required) {
     console.log(r.data.device_required);
