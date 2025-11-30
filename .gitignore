@@ -1,0 +1,46 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE/Editor
+.vscode/
+.idea/
+*.iml
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+coverage.xml
+.coverage*
+dist/
+build/
+logs/
+*.log
+
+# Env/Secrets (예시는 커밋, 실제 키는 차단)
+.env
+*.env
+server/.env
+server/.env.local
+!server/.env.example
+
+# Uvicorn/PIDs
+*.pid
+
+# Mongo dump(의도적 내보내기 산출물)
+dump/
+*.bson
+
+# Web (추후 npm/빌드 도입 대비)
+web/node_modules/
+web/dist/
+web/build/
+web/.cache/

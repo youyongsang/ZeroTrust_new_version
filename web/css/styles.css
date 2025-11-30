@@ -1,0 +1,286 @@
+/* 기존 변수 및 기본 스타일 유지 */
+:root {
+  color-scheme: light dark;
+  --bg: #0b0c10;
+  --fg: #e6e6e6;
+  --muted: #9aa0a6;
+  --card: #16181d;
+  --border: #2a2f36;
+  --primary: #4f8cff;
+  --primary-ink: #0b1a33;
+  --outline: #3a3f47;
+  --radius: 14px;
+  --danger: #e74c3c;
+  --success: #2ecc71;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.container {
+  max-width: 720px;
+  margin: 40px auto;
+  padding: 0 16px;
+}
+
+h1 { margin: 0 0 12px 0; font-weight: 800; letter-spacing: .2px; }
+h2 { margin: 0 0 12px 0; font-weight: 700; }
+
+.hint {
+  color: var(--muted);
+  margin: 0 0 22px 0;
+  line-height: 1.5;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px 18px;
+  margin: 18px 0;
+  box-shadow: 0 8px 26px rgba(0,0,0,.18);
+  transition: box-shadow .2s;
+}
+
+label {
+  display: block;
+  margin: 10px 0 6px 2px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+input {
+  width: 100%;
+  padding: 12px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--outline);
+  background: #0f1116;
+  color: var(--fg);
+  outline: none;
+  font-size: 16px;
+  margin-bottom: 10px;
+  transition: border-color .2s;
+}
+input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,140,255,.15); }
+
+.row { display: flex; align-items: center; }
+.gap { gap: 10px; }
+
+.btn {
+  padding: 10px 18px;
+  border-radius: 10px;
+  border: 1px solid var(--outline);
+  background: #12151b;
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 15px;
+  margin-top: 8px;
+  margin-right: 8px;
+  transition: background .2s, border-color .2s;
+}
+.btn:hover { filter: brightness(1.08); background: var(--primary); color: #fff; border-color: var(--primary);}
+.btn:active { transform: translateY(1px); }
+
+.btn-primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+.btn-outline {
+  background: transparent;
+  border-color: var(--outline);
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  background: #0f1116;
+  border: 1px dashed var(--outline);
+  padding: 10px;
+  border-radius: 10px;
+  font-size: 15px;
+  margin-bottom: 10px;
+}
+
+.small { font-size: 12px; color: var(--muted); }
+
+.msg {
+  margin: 10px 0 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 15px;
+  background: #181a1f;
+  color: var(--fg);
+  border: 1px solid var(--outline);
+  min-height: 24px;
+  word-break: break-all;
+}
+.msg.success { background: #162b1f; color: var(--success); border-color: var(--success);}
+.msg.error { background: #2a1818; color: var(--danger); border-color: var(--danger);}
+.msg.info { background: #181a1f; color: var(--primary); border-color: var(--primary); }
+
+input[type="password"] {
+  letter-spacing: 2px;
+}
+
+input:disabled, .btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+section.card {
+  margin-bottom: 24px;
+}
+
+/* OTP/QR 박스 스타일 */
+.qr-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 18px 0;
+  padding: 12px 0;
+}
+.qr-box canvas {
+  margin: 8px 0;
+  border-radius: 8px;
+  background: #fff;
+}
+.totp-secret {
+  font-family: ui-monospace, monospace;
+  font-size: 16px;
+  background: #222;
+  color: #4f8cff;
+  padding: 6px 12px;
+  border-radius: 8px;
+  margin: 8px 0;
+  letter-spacing: 2px;
+}
+.totp-url {
+  font-size: 13px;
+  color: var(--muted);
+  word-break: break-all;
+  margin-bottom: 8px;
+}
+.backup-list {
+  margin: 12px 0;
+  padding: 0;
+  list-style: none;
+}
+.backup-list li {
+  font-family: ui-monospace, monospace;
+  background: #181a1f;
+  color: var(--success);
+  padding: 6px 12px;
+  border-radius: 6px;
+  margin-bottom: 4px;
+  font-size: 15px;
+}
+
+/* JS에서 show/hide 처리되는 박스 */
+#mfaBox, #totpActivateBox, #regStepCode, #regStepEmail, #backupList, #totpRegBox, #qrBoxReg, #qrBoxAct {
+  transition: opacity .2s;
+}
+
+/* 회원가입용 TOTP 등록 박스 */
+#totpRegBox {
+  margin-bottom: 24px;
+  padding-bottom: 8px;
+}
+#qrBoxReg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 18px 0;
+  padding: 12px 0;
+}
+#totpActivateCode {
+  width: 100%;
+  padding: 12px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--outline);
+  background: #0f1116;
+  color: var(--fg);
+  outline: none;
+  font-size: 16px;
+  margin-bottom: 10px;
+  transition: border-color .2s;
+}
+#totpActivateCode:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(79,140,255,.15);
+}
+#btnActivateTotp {
+  padding: 10px 18px;
+  border-radius: 10px;
+  border: 1px solid var(--primary);
+  background: var(--primary);
+  color: white;
+  cursor: pointer;
+  font-size: 15px;
+  margin-top: 8px;
+  margin-right: 8px;
+  transition: background .2s, border-color .2s;
+}
+#btnActivateTotp:hover {
+  background: #357ae8;
+  border-color: #357ae8;
+}
+#totpActivateMsg {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 8px;
+}
+
+/* 로그인용 OTP 입력 박스 */
+#mfaBox {
+  margin-top: 18px;
+  padding: 16px 0;
+}
+#otpCode {
+  width: 100%;
+  padding: 12px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--outline);
+  background: #0f1116;
+  color: var(--fg);
+  outline: none;
+  font-size: 16px;
+  margin-bottom: 10px;
+  transition: border-color .2s;
+}
+#otpCode:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(79,140,255,.15);
+}
+#btnOtp {
+  padding: 10px 18px;
+  border-radius: 10px;
+  border: 1px solid var(--primary);
+  background: var(--primary);
+  color: white;
+  cursor: pointer;
+  font-size: 15px;
+  margin-top: 8px;
+  margin-right: 8px;
+  transition: background .2s, border-color .2s;
+}
+#btnOtp:hover {
+  background: #357ae8;
+  border-color: #357ae8;
+}
+#mfaMsg {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 8px;
+}
+
+@media (max-width: 600px) {
+  .container { max-width: 98vw; }
+  .card { padding: 14px 8px; }
+  input, .btn { font-size: 15px; }
+  .qr-box canvas { width: 140px !important; }
+}
